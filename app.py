@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from datetime import datetime
-import json
+import urllib.parse
 
 app = FastAPI()
 
@@ -10,7 +10,6 @@ logs = []
 
 @app.get("/testcallback2")
 def read_test():
-    # Log the GET request
     logs.append({
         "method": "GET",
         "time": datetime.now().isoformat(),
@@ -20,14 +19,19 @@ def read_test():
 
 @app.post("/testcallback2")
 async def create_test(request: Request):
-    data = await request.json()
-    # Log the POST request with its data
+    raw_body = await request.body()
+    # raw_body is URL-encoded form data (bytes). Decode it and parse.
+    body_str = raw_body.decode('utf-8')
+    parsed_data = urllib.parse.parse_qs(body_str)
+    # parsed_data is a dict with keys and a list of values for each key.
+    # If you prefer single values, you can extract them (if you know there's only one value per key).
+
     logs.append({
         "method": "POST",
         "time": datetime.now().isoformat(),
-        "body": data
+        "body": parsed_data
     })
-    return {"received_data": data}
+    return {"received_data": parsed_data}
 
 @app.get("/testcallback2/page", response_class=HTMLResponse)
 def get_page():
@@ -52,8 +56,8 @@ def get_page():
             async function postData() {
                 const resp = await fetch('/testcallback2', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({foo: 'bar'})
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: 'foo=bar'
                 });
                 const json = await resp.json();
                 document.getElementById('response').innerText = JSON.stringify(json, null, 2);
@@ -72,5 +76,4 @@ def get_page():
 
 @app.get("/testcallback2/logs")
 def get_logs():
-    # Return the logs as JSON
     return logs
