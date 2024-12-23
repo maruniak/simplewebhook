@@ -49,6 +49,10 @@ def get_page():
         <script>
             async function getData() {
                 const resp = await fetch('/testcallback2');
+                if (!resp.ok) {
+                    document.getElementById('response').innerText = "Error fetching GET data.";
+                    return;
+                }
                 const json = await resp.json();
                 document.getElementById('response').innerText = JSON.stringify(json, null, 2);
             }
@@ -59,12 +63,20 @@ def get_page():
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: 'foo=bar'
                 });
+                if (!resp.ok) {
+                    document.getElementById('response').innerText = "Error posting data.";
+                    return;
+                }
                 const json = await resp.json();
                 document.getElementById('response').innerText = JSON.stringify(json, null, 2);
             }
 
             async function showLogs() {
                 const resp = await fetch('/testcallback2/logs');
+                if (!resp.ok) {
+                    document.getElementById('logsArea').innerText = "Error fetching logs.";
+                    return;
+                }
                 const logs = await resp.json();
                 document.getElementById('logsArea').innerText = JSON.stringify(logs, null, 2);
             }
