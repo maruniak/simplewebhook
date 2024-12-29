@@ -88,46 +88,97 @@ async def handle_post(request: Request):
     raw_body = await request.body()
     parsed_data = urllib.parse.parse_qs(raw_body.decode("utf-8"))
 
-    # Log the POST request locally
+    # Log the POST request in the database
     db = SessionLocal()
     try:
         log_entry = Log(method="POST", time=datetime.now(), body=str(parsed_data))
         db.add(log_entry)
         db.commit()
+        log_id = log_entry.id  # Get the log ID for later updates
     finally:
         db.close()
 
-    # Forward the request if redirection is enabled
+    # Attempt to redirect
     if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
-        print("Forwarding POST request to:", REDIRECTION_URL)
-        print("Headers:", dict(request.headers))
-        print("Body:", raw_body)
-        return await forward_request_to_url(request, REDIRECTION_URL)
+        try:
+            # Forward the request
+            print("Forwarding POST request to:", REDIRECTION_URL)
+            print("Headers:", dict(request.headers))
+            print("Body:", raw_body)
+            forward_response = await forward_request_to_url(request, REDIRECTION_URL)
 
-    # Normal response for local processing
+            # Update the log to indicate successful redirection
+            db = SessionLocal()
+            try:
+                log_entry = db.query(Log).filter(Log.id == log_id).first()
+                if log_entry:
+                    log_entry.body += " | Redirected Successfully"
+                    db.commit()
+            finally:
+                db.close()
+
+            return forward_response
+        except Exception as e:
+            # Log redirection failure
+            db = SessionLocal()
+            try:
+                log_entry = db.query(Log).filter(Log.id == log_id).first()
+                if log_entry:
+                    log_entry.body += f" | Redirect Failed: {str(e)}"
+                    db.commit()
+            finally:
+                db.close()
+            raise HTTPException(status_code=500, detail=f"Redirection failed: {str(e)}")
+
+    # If no redirection, return a normal response
     return {"received_data": parsed_data}
 
 
 @app.get("/testcallback2")
 async def handle_get(request: Request):
-    # Log the GET request locally
+    # Log the GET request in the database
     db = SessionLocal()
     try:
-        log_entry = Log(method="GET", time=datetime.now(), body=None)
+        log_entry = Log(method="GET", time=datetime.now(), body="Request received")
         db.add(log_entry)
         db.commit()
+        log_id = log_entry.id  # Get the log ID for later updates
     finally:
         db.close()
 
-    # Forward the request if redirection is enabled
+    # Attempt to redirect
     if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
-        print("Forwarding GET request to:", REDIRECTION_URL)
-        print("Headers:", dict(request.headers))
-        return await forward_request_to_url(request, REDIRECTION_URL)
+        try:
+            # Forward the request
+            print("Forwarding GET request to:", REDIRECTION_URL)
+            print("Headers:", dict(request.headers))
+            forward_response = await forward_request_to_url(request, REDIRECTION_URL)
 
-    # Normal response for local processing
+            # Update the log to indicate successful redirection
+            db = SessionLocal()
+            try:
+                log_entry = db.query(Log).filter(Log.id == log_id).first()
+                if log_entry:
+                    log_entry.body += " | Redirected Successfully"
+                    db.commit()
+            finally:
+                db.close()
+
+            return forward_response
+        except Exception as e:
+            # Log redirection failure
+            db = SessionLocal()
+            try:
+                log_entry = db.query(Log).filter(Log.id == log_id).first()
+                if log_entry:
+                    log_entry.body += f" | Redirect Failed: {str(e)}"
+                    db.commit()
+            finally:
+                db.close()
+            raise HTTPException(status_code=500, detail=f"Redirection failed: {str(e)}")
+
+    # If no redirection, return a normal response
     return {"message": "GET request success"}
-
 
 
 @app.get("/testcallback2/logs")
