@@ -85,16 +85,10 @@ async def forward_request_to_url(request: Request, url: str):
 
 @app.post("/testcallback2")
 async def handle_post(request: Request):
-    if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
-        print("Forwarding POST request to:", REDIRECTION_URL)
-        print("Headers:", dict(request.headers))
-        print("Body:", await request.body())
-        return await forward_request_to_url(request, REDIRECTION_URL)
-
-    # Process POST request and log to the database
     raw_body = await request.body()
     parsed_data = urllib.parse.parse_qs(raw_body.decode("utf-8"))
 
+    # Log the POST request locally
     db = SessionLocal()
     try:
         log_entry = Log(method="POST", time=datetime.now(), body=str(parsed_data))
@@ -103,16 +97,20 @@ async def handle_post(request: Request):
     finally:
         db.close()
 
+    # Forward the request if redirection is enabled
+    if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
+        print("Forwarding POST request to:", REDIRECTION_URL)
+        print("Headers:", dict(request.headers))
+        print("Body:", raw_body)
+        return await forward_request_to_url(request, REDIRECTION_URL)
+
+    # Normal response for local processing
     return {"received_data": parsed_data}
 
 
 @app.get("/testcallback2")
 async def handle_get(request: Request):
-    if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
-        print("Forwarding GET request to:", REDIRECTION_URL)
-        print("Headers:", dict(request.headers))
-        return await forward_request_to_url(request, REDIRECTION_URL)
-
+    # Log the GET request locally
     db = SessionLocal()
     try:
         log_entry = Log(method="GET", time=datetime.now(), body=None)
@@ -121,7 +119,15 @@ async def handle_get(request: Request):
     finally:
         db.close()
 
+    # Forward the request if redirection is enabled
+    if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
+        print("Forwarding GET request to:", REDIRECTION_URL)
+        print("Headers:", dict(request.headers))
+        return await forward_request_to_url(request, REDIRECTION_URL)
+
+    # Normal response for local processing
     return {"message": "GET request success"}
+
 
 
 @app.get("/testcallback2/logs")
