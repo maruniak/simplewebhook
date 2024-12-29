@@ -5,7 +5,8 @@
     <h1>Test Callback Page</h1>
     <button onclick="getData()">Get Data (GET)</button>
     <button onclick="postData()">Post Data (POST)</button>
-    <button onclick="showLogs()">Show Logs</button>
+    <button onclick="showRecentLogs()">Show Last 10 Logs</button>
+    <button onclick="showFullLogs()">Show Full Logs</button>
     <div id="response"></div>
     <div id="logsArea"></div>
     <script>
@@ -35,14 +36,25 @@
             }
         }
 
-        async function showLogs() {
+        async function showRecentLogs() {
             try {
-                const resp = await fetch('/webhook/testcallback2/logs');
+                const resp = await fetch('/webhook/testcallback2/logs/recent');
                 if (!resp.ok) throw new Error('Network response was not ok');
                 const logs = await resp.json();
                 document.getElementById('logsArea').innerText = JSON.stringify(logs, null, 2);
             } catch (err) {
-                document.getElementById('logsArea').innerText = "Error fetching logs: " + err.message;
+                document.getElementById('logsArea').innerText = "Error fetching recent logs: " + err.message;
+            }
+        }
+
+        async function showFullLogs() {
+            try {
+                const resp = await fetch('/webhook/testcallback2/logs/full');
+                if (!resp.ok) throw new Error('Network response was not ok');
+                const logs = await resp.json();
+                document.getElementById('logsArea').innerText = JSON.stringify(logs, null, 2);
+            } catch (err) {
+                document.getElementById('logsArea').innerText = "Error fetching full logs: " + err.message;
             }
         }
     </script>

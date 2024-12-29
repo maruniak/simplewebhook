@@ -9,6 +9,8 @@ services:
     expose:
       - "40871"  # Internal port
     restart: unless-stopped
+    volumes:
+      - ./data:/app/data  # Persist database files
     networks:
       - webnet
 

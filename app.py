@@ -6,7 +6,8 @@ from datetime import datetime
 import urllib.parse
 
 # Database setup
-DATABASE_URL = "sqlite:///./logs.db"
+DATABASE_URL = "sqlite:///./data/logs.db"  # Ensure the path matches the mounted volume
+
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 Base = declarative_base()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -49,7 +50,21 @@ async def create_test(request: Request):
 @app.get("/testcallback2/logs")
 def get_logs():
     db = SessionLocal()
-    logs = db.query(Log).all()
+    logs = db.query(Log).order_by(Log.time.desc()).all()
+    db.close()
+    return [{"method": log.method, "time": log.time, "body": log.body} for log in logs]
+
+@app.get("/testcallback2/logs/recent")
+def get_recent_logs():
+    db = SessionLocal()
+    logs = db.query(Log).order_by(Log.time.desc()).limit(10).all()
+    db.close()
+    return [{"method": log.method, "time": log.time, "body": log.body} for log in logs]
+
+@app.get("/testcallback2/logs/full")
+def get_full_logs():
+    db = SessionLocal()
+    logs = db.query(Log).order_by(Log.time.desc()).all()
     db.close()
     return [{"method": log.method, "time": log.time, "body": log.body} for log in logs]
 
