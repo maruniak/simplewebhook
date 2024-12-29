@@ -52,32 +52,49 @@ async def forward_request_to_url(request: Request, url: str):
     async with httpx.AsyncClient() as client:
         # Forward headers
         headers = dict(request.headers)
-        
+        headers.pop("host", None)  # Remove 'host' header to avoid conflict
+
         # Forward the body
         body = await request.body()
-        
-        # Send the request to the redirection URL
-        response = await client.request(
-            method=request.method,
-            url=url,
-            headers=headers,
-            content=body
-        )
-        return JSONResponse(
-            status_code=response.status_code,
-            content=response.json() if response.headers.get("Content-Type") == "application/json" else response.text
-        )
+        content_type = headers.get("content-type", "")
+
+        # Handle JSON and form-encoded bodies
+        if content_type.startswith("application/json"):
+            body_content = body.decode("utf-8")
+        elif content_type.startswith("application/x-www-form-urlencoded"):
+            body_content = body.decode("utf-8")
+        else:
+            body_content = body  # Default binary content
+
+        try:
+            # Forward the request to the redirection URL
+            response = await client.request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                content=body_content
+            )
+
+            # Return the response from the redirected server
+            if "application/json" in response.headers.get("Content-Type", ""):
+                return JSONResponse(status_code=response.status_code, content=response.json())
+            return JSONResponse(status_code=response.status_code, content={"message": response.text})
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to forward request: {str(e)}")
+
 
 @app.post("/testcallback2")
 async def handle_post(request: Request):
     if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
+        print("Forwarding POST request to:", REDIRECTION_URL)
+        print("Headers:", dict(request.headers))
+        print("Body:", await request.body())
         return await forward_request_to_url(request, REDIRECTION_URL)
 
     # Process POST request and log to the database
     raw_body = await request.body()
     parsed_data = urllib.parse.parse_qs(raw_body.decode("utf-8"))
 
-    # Save log to the database
     db = SessionLocal()
     try:
         log_entry = Log(method="POST", time=datetime.now(), body=str(parsed_data))
@@ -88,12 +105,14 @@ async def handle_post(request: Request):
 
     return {"received_data": parsed_data}
 
+
 @app.get("/testcallback2")
 async def handle_get(request: Request):
     if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
+        print("Forwarding GET request to:", REDIRECTION_URL)
+        print("Headers:", dict(request.headers))
         return await forward_request_to_url(request, REDIRECTION_URL)
 
-    # Save log to the database
     db = SessionLocal()
     try:
         log_entry = Log(method="GET", time=datetime.now(), body=None)
