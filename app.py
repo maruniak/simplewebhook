@@ -23,8 +23,6 @@ async def create_test(request: Request):
     # raw_body is URL-encoded form data (bytes). Decode it and parse.
     body_str = raw_body.decode('utf-8')
     parsed_data = urllib.parse.parse_qs(body_str)
-    # parsed_data is a dict with keys and a list of values for each key.
-    # If you prefer single values, you can extract them (if you know there's only one value per key).
 
     logs.append({
         "method": "POST",
@@ -48,37 +46,40 @@ def get_page():
         <div id="logsArea"></div>
         <script>
             async function getData() {
-                const resp = await fetch('/testcallback2');
-                if (!resp.ok) {
-                    document.getElementById('response').innerText = "Error fetching GET data.";
-                    return;
+                try {
+                    const resp = await fetch('/webhook/testcallback2');
+                    if (!resp.ok) throw new Error('Network response was not ok');
+                    const json = await resp.json();
+                    document.getElementById('response').innerText = JSON.stringify(json, null, 2);
+                } catch (err) {
+                    document.getElementById('response').innerText = "Error fetching GET data: " + err.message;
                 }
-                const json = await resp.json();
-                document.getElementById('response').innerText = JSON.stringify(json, null, 2);
             }
 
             async function postData() {
-                const resp = await fetch('/testcallback2', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: 'foo=bar'
-                });
-                if (!resp.ok) {
-                    document.getElementById('response').innerText = "Error posting data.";
-                    return;
+                try {
+                    const resp = await fetch('/webhook/testcallback2', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                        body: 'foo=bar'
+                    });
+                    if (!resp.ok) throw new Error('Network response was not ok');
+                    const json = await resp.json();
+                    document.getElementById('response').innerText = JSON.stringify(json, null, 2);
+                } catch (err) {
+                    document.getElementById('response').innerText = "Error posting data: " + err.message;
                 }
-                const json = await resp.json();
-                document.getElementById('response').innerText = JSON.stringify(json, null, 2);
             }
 
             async function showLogs() {
-                const resp = await fetch('/testcallback2/logs');
-                if (!resp.ok) {
-                    document.getElementById('logsArea').innerText = "Error fetching logs.";
-                    return;
+                try {
+                    const resp = await fetch('/webhook/testcallback2/logs');
+                    if (!resp.ok) throw new Error('Network response was not ok');
+                    const logs = await resp.json();
+                    document.getElementById('logsArea').innerText = JSON.stringify(logs, null, 2);
+                } catch (err) {
+                    document.getElementById('logsArea').innerText = "Error fetching logs: " + err.message;
                 }
-                const logs = await resp.json();
-                document.getElementById('logsArea').innerText = JSON.stringify(logs, null, 2);
             }
         </script>
     </body>

@@ -16,7 +16,7 @@ services:
     image: nginx:latest
     container_name: nginx_webhook_proxy
     ports:
-      - "40871:40871"  # Map external to internal
+      - "443:443"  # Expose HTTPS
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/certs:/etc/nginx/certs:ro
