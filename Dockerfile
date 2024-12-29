@@ -16,5 +16,8 @@ COPY . .
 # Expose the index.html file
 COPY index.html /app/index.html
 
+# Copy the .env file
+COPY .env /app/.env
+
 # Command to run the application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "40871"]
