@@ -4,3 +4,5 @@ temp
 
 data
 .env
+
+*.db
