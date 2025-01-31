@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head><title>Test Page</title></head>
+<body>
+    <h1>Test Callback Page</h1>
+    <button onclick="getData()">Get Data (GET)</button>
+    <button onclick="postData()">Post Data (POST)</button>
+    <button onclick="showRecentLogs()">Show Last 10 Logs</button>
+    <button onclick="showFullLogs()">Show Full Logs</button>
+    <button onclick="clearLogs()">Clear Logs</button>
+    <div id="response"></div>
+    <div id="logsArea"></div>
+    <script>
+        async function getData() {
+            try {
+                const resp = await fetch('/webhook/testcallback2', {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+                const json = await resp.json();
+                document.getElementById('response').innerText = JSON.stringify(json, null, 2);
+            } catch (err) {
+                console.error("Error in GET request:", err);
+                document.getElementById('response').innerText = `Error fetching GET data: ${err.message}`;
+            }
+        }
+
+        async function postData() {
+            try {
+                const resp = await fetch('/webhook/testcallback2', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'foo=bar'
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+                const json = await resp.json();
+                document.getElementById('response').innerText = JSON.stringify(json, null, 2);
+            } catch (err) {
+                console.error("Error in POST request:", err);
+                document.getElementById('response').innerText = `Error posting data: ${err.message}`;
+            }
+        }
+
+        async function showRecentLogs() {
+            try {
+                const resp = await fetch('/webhook/testcallback2/logs/recent');
+                if (!resp.ok) throw new Error('Network response was not ok');
+                const logs = await resp.json();
+                document.getElementById('logsArea').innerText = JSON.stringify(logs, null, 2);
+            } catch (err) {
+                document.getElementById('logsArea').innerText = "Error fetching recent logs: " + err.message;
+            }
+        }
+
+        async function showFullLogs() {
+            try {
+                const resp = await fetch('/webhook/testcallback2/logs/full');
+                if (!resp.ok) throw new Error('Network response was not ok');
+                const logs = await resp.json();
+                document.getElementById('logsArea').innerText = JSON.stringify(logs, null, 2);
+            } catch (err) {
+                document.getElementById('logsArea').innerText = "Error fetching full logs: " + err.message;
+            }
+        }
+
+        async function clearLogs() {
+            if (confirm("Are you sure you want to clear all logs? This action cannot be undone.")) {
+                try {
+                    const resp = await fetch('/webhook/testcallback2/logs/clear', {
+                        method: 'DELETE',
+                    });
+                    if (!resp.ok) throw new Error('Network response was not ok');
+                    const json = await resp.json();
+                    alert(json.message);
+                    document.getElementById('logsArea').innerText = ""; // Clear logs display
+                } catch (err) {
+                    alert("Error clearing logs: " + err.message);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
