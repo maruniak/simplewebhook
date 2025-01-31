@@ -11,6 +11,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/app/data  # Persist database files
+      - ./pem:/app/pem:ro  # Mount the pem directory as read-only      
     networks:
       - webnet
 

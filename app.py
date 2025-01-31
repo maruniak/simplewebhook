@@ -1,23 +1,30 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse, FileResponse
+from fastapi import FastAPI, Request, HTTPException, Response, BackgroundTasks
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from sqlalchemy import create_engine, Column, String, DateTime, Integer
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
 import urllib.parse
-import httpx
+import base64
 import os
 from dotenv import load_dotenv
+import hashlib
+import hmac
+import httpx
 
+# ------------------------------------------------------------------------------
 # Load environment variables
+# ------------------------------------------------------------------------------
 load_dotenv()
 
-# Environment variables
 NEED_REDIRECT = os.getenv("NEED_REDIRECT", "false").lower() == "true"
 REDIRECTION_URL = os.getenv("REDIRECTION_URL", "")
 ENABLE_PROTECT = os.getenv("ENABLE_PROTECT", "false").lower() == "true"
 ALLOWED_IPS = os.getenv("ALLOWED_IP", "").split(",")
+SECRET_KEY_PATH = os.getenv("SECRET_KEY_PATH", "./certs/test-server.cert")
 
+# ------------------------------------------------------------------------------
 # Database setup
+# ------------------------------------------------------------------------------
 DATABASE_URL = "sqlite:///./data/logs.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 Base = declarative_base()
@@ -32,155 +39,195 @@ class Log(Base):
 
 Base.metadata.create_all(bind=engine)
 
+# ------------------------------------------------------------------------------
+# FastAPI application
+# ------------------------------------------------------------------------------
 app = FastAPI()
 
+# ------------------------------------------------------------------------------
+# Utility functions
+# ------------------------------------------------------------------------------
 def is_ip_allowed(client_ip: str) -> bool:
     """Check if the client's IP is allowed."""
     return client_ip in ALLOWED_IPS
 
+def verify_signature(data: str, signature: str) -> bool:
+    """Validate the signature of the incoming request."""
+    try:
+        # For demonstration, we "pretend" to read a public key and compare a signature
+        public_key = open(SECRET_KEY_PATH, "rb").read()
+        decoded_signature = base64.b64decode(signature)
+        valid = hmac.compare_digest(data, decoded_signature)
+        return valid
+    except Exception as e:
+        print(f"DEBUG: Signature verification failed: {e}")
+        return False
+
+def generate_response(action: str, reason: str = "", forward_url: str = "") -> str:
+    """Generate the required response format in plain text."""
+    response_lines = [
+        f"Response.action={action}",
+        f"Response.reason={reason}",
+        f"Response.forwardUrl={forward_url}",
+    ]
+    return "\n".join(response_lines) + "\n"
+
+# ------------------------------------------------------------------------------
+# Middleware
+# ------------------------------------------------------------------------------
 @app.middleware("http")
 async def ip_protection_middleware(request: Request, call_next):
     """Middleware to enforce IP protection if enabled."""
     if ENABLE_PROTECT:
         client_ip = request.client.host
         if not is_ip_allowed(client_ip):
+            print(f"DEBUG: IP {client_ip} is not allowed.")
             raise HTTPException(status_code=403, detail="Access forbidden")
     return await call_next(request)
 
-async def forward_request_to_url(request: Request, url: str):
-    """Forward the incoming request to another URL."""
+# ------------------------------------------------------------------------------
+# Forwarding function (used in background)
+# ------------------------------------------------------------------------------
+async def forward_in_background(
+    data: dict,  # Already parsed POST data
+    headers: dict,
+    log_id: int,
+    url: str
+):
+    """Forward the request to the external URL in the background."""
+    print("DEBUG (BG): Entering forward_in_background()")
+    print(f"DEBUG (BG): Forwarding to {url}")
+
+    # Convert the parsed_data back to x-www-form-urlencoded
+    form_body = []
+    for k, v in data.items():
+        form_body.append(f"{k}={v[0]}")
+    encoded_body = "&".join(form_body)
+
+    # Perform the HTTP call
     async with httpx.AsyncClient() as client:
-        # Forward headers
-        headers = dict(request.headers)
-        headers.pop("host", None)  # Remove 'host' header to avoid conflict
-
-        # Forward the body
-        body = await request.body()
-        content_type = headers.get("content-type", "")
-
-        # Handle JSON and form-encoded bodies
-        if content_type.startswith("application/json"):
-            body_content = body.decode("utf-8")
-        elif content_type.startswith("application/x-www-form-urlencoded"):
-            body_content = body.decode("utf-8")
-        else:
-            body_content = body  # Default binary content
-
         try:
-            # Forward the request to the redirection URL
-            response = await client.request(
-                method=request.method,
+            response = await client.post(
                 url=url,
                 headers=headers,
-                content=body_content
+                content=encoded_body
             )
+            print(f"DEBUG (BG): External server returned status: {response.status_code}")
+            print(f"DEBUG (BG): External server returned body: {response.text}")
 
-            # Return the response from the redirected server
-            if "application/json" in response.headers.get("Content-Type", ""):
-                return JSONResponse(status_code=response.status_code, content=response.json())
-            return JSONResponse(status_code=response.status_code, content={"message": response.text})
+            # Update log to indicate success/failure
+            db = SessionLocal()
+            try:
+                entry = db.query(Log).filter(Log.id == log_id).first()
+                if entry:
+                    entry.body += f" | BG Redirect: {response.status_code}"
+                db.commit()
+            finally:
+                db.close()
+
         except httpx.RequestError as e:
-            raise HTTPException(status_code=500, detail=f"Failed to forward request: {str(e)}")
+            print(f"ERROR (BG): BG forward request error => {e}")
+            db = SessionLocal()
+            try:
+                entry = db.query(Log).filter(Log.id == log_id).first()
+                if entry:
+                    entry.body += f" | BG Redirect Failed: {str(e)}"
+                db.commit()
+            finally:
+                db.close()
 
-
+# ------------------------------------------------------------------------------
+# Main POST endpoint
+# ------------------------------------------------------------------------------
 @app.post("/testcallback2")
-async def handle_post(request: Request):
-    raw_body = await request.body()
-    parsed_data = urllib.parse.parse_qs(raw_body.decode("utf-8"))
+async def handle_post(request: Request, background_tasks: BackgroundTasks):
+    print("DEBUG: Received a POST request on /testcallback2")
 
-    # Log the POST request in the database
+    # Read raw body
+    raw_body = await request.body()
+    print(f"DEBUG: Raw body: {raw_body}")
+
+    # Parse the request data
+    try:
+        parsed_data = urllib.parse.parse_qs(raw_body.decode("utf-8"))
+        print(f"DEBUG: Parsed data => {parsed_data}")
+    except Exception as e:
+        print(f"ERROR: Could not parse body => {e}")
+        return PlainTextResponse("Error parsing body", status_code=400)
+
+    # Log the request in the database
     db = SessionLocal()
+    log_id = None
     try:
         log_entry = Log(method="POST", time=datetime.now(), body=str(parsed_data))
         db.add(log_entry)
         db.commit()
-        log_id = log_entry.id  # Get the log ID for later updates
+        log_id = log_entry.id
+        print(f"DEBUG: Saved log entry with id {log_id}")
+    except Exception as e:
+        print(f"ERROR: Failed to save log entry => {e}")
     finally:
         db.close()
 
-    # Attempt to redirect
-    if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
-        try:
-            # Forward the request
-            print("Forwarding POST request to:", REDIRECTION_URL)
-            print("Headers:", dict(request.headers))
-            print("Body:", raw_body)
-            forward_response = await forward_request_to_url(request, REDIRECTION_URL)
+    # Always build the local response first
+    # (The Payment Gateway sees this response no matter what)
+    response_action = "approve"
+    response_reason = "ok"
+    response_forward_url = ""
 
-            # Update the log to indicate successful redirection
-            db = SessionLocal()
-            try:
-                log_entry = db.query(Log).filter(Log.id == log_id).first()
-                if log_entry:
-                    log_entry.body += " | Redirected Successfully"
-                    db.commit()
-            finally:
-                db.close()
+    # Construct plain text response from the parsed_data
+    response_lines = []
+    for key, value in parsed_data.items():
+        response_lines.append(f"{key}={value[0]}")
 
-            return forward_response
-        except Exception as e:
-            # Log redirection failure
-            db = SessionLocal()
-            try:
-                log_entry = db.query(Log).filter(Log.id == log_id).first()
-                if log_entry:
-                    log_entry.body += f" | Redirect Failed: {str(e)}"
-                    db.commit()
-            finally:
-                db.close()
-            raise HTTPException(status_code=500, detail=f"Redirection failed: {str(e)}")
+    response_lines.append(f"Response.action={response_action}")
+    response_lines.append(f"Response.reason={response_reason}")
+    response_lines.append(f"Response.forwardUrl={response_forward_url}")
 
-    # If no redirection, return a normal response
-    return {"received_data": parsed_data}
+    response_text = "\n".join(response_lines)
+    print("DEBUG: Final local response to the gateway:")
+    print(response_text)
 
+    # If we need to forward in the background, do so after returning a local response
+    if NEED_REDIRECT and REDIRECTION_URL:
+        print("DEBUG: Scheduling background task for redirection...")
+        # We can re-use request headers, but remove 'host'
+        new_headers = dict(request.headers)
+        new_headers.pop("host", None)
 
+        # Add the background task
+        background_tasks.add_task(
+            forward_in_background,
+            data=parsed_data,
+            headers=new_headers,
+            log_id=log_id,
+            url=REDIRECTION_URL
+        )
+
+    # Return local response IMMEDIATELY
+    return PlainTextResponse(content=response_text)
+
+# ------------------------------------------------------------------------------
+# GET endpoint
+# ------------------------------------------------------------------------------
 @app.get("/testcallback2")
 async def handle_get(request: Request):
-    # Log the GET request in the database
+    print("DEBUG: Received a GET request on /testcallback2")
+
     db = SessionLocal()
     try:
         log_entry = Log(method="GET", time=datetime.now(), body="Request received")
         db.add(log_entry)
         db.commit()
-        log_id = log_entry.id  # Get the log ID for later updates
+        print("DEBUG: Logged GET request.")
     finally:
         db.close()
 
-    # Attempt to redirect
-    if NEED_REDIRECT and REDIRECTION_URL and request.client.host not in ["127.0.0.1", "localhost"]:
-        try:
-            # Forward the request
-            print("Forwarding GET request to:", REDIRECTION_URL)
-            print("Headers:", dict(request.headers))
-            forward_response = await forward_request_to_url(request, REDIRECTION_URL)
+    return PlainTextResponse("GET requests are not processed for this endpoint.", status_code=405)
 
-            # Update the log to indicate successful redirection
-            db = SessionLocal()
-            try:
-                log_entry = db.query(Log).filter(Log.id == log_id).first()
-                if log_entry:
-                    log_entry.body += " | Redirected Successfully"
-                    db.commit()
-            finally:
-                db.close()
-
-            return forward_response
-        except Exception as e:
-            # Log redirection failure
-            db = SessionLocal()
-            try:
-                log_entry = db.query(Log).filter(Log.id == log_id).first()
-                if log_entry:
-                    log_entry.body += f" | Redirect Failed: {str(e)}"
-                    db.commit()
-            finally:
-                db.close()
-            raise HTTPException(status_code=500, detail=f"Redirection failed: {str(e)}")
-
-    # If no redirection, return a normal response
-    return {"message": "GET request success"}
-
-
+# ------------------------------------------------------------------------------
+# Additional Endpoints (Logs, Page, Clear Logs)
+# ------------------------------------------------------------------------------
 @app.get("/testcallback2/logs")
 def get_logs():
     db = SessionLocal()

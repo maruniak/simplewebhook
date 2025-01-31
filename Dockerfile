@@ -19,5 +19,8 @@ COPY index.html /app/index.html
 # Copy the .env file
 COPY .env /app/.env
 
+# Copy the certificate and key files
+COPY pem /app/pem
+
 # Command to run the application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "40871"]
