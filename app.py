@@ -35,7 +35,8 @@ class Log(Base):
     id = Column(Integer, primary_key=True, index=True)
     method = Column(String, index=True)
     time = Column(DateTime, default=datetime.now)
-    body = Column(String)
+    headers = Column(String)  # New column for headers
+    body = Column(String)     # Existing column for body
 
 Base.metadata.create_all(bind=engine)
 
@@ -121,6 +122,7 @@ async def forward_in_background(
                 entry = db.query(Log).filter(Log.id == log_id).first()
                 if entry:
                     entry.body += f" | BG Redirect: {response.status_code}"
+                    entry.headers += f" | BG Redirect Headers: {str(headers)}"
                 db.commit()
             finally:
                 db.close()
@@ -132,6 +134,7 @@ async def forward_in_background(
                 entry = db.query(Log).filter(Log.id == log_id).first()
                 if entry:
                     entry.body += f" | BG Redirect Failed: {str(e)}"
+                    entry.headers += f" | BG Redirect Failed Headers: {str(headers)}"
                 db.commit()
             finally:
                 db.close()
@@ -159,7 +162,16 @@ async def handle_post(request: Request, background_tasks: BackgroundTasks):
     db = SessionLocal()
     log_id = None
     try:
-        log_entry = Log(method="POST", time=datetime.now(), body=str(parsed_data))
+        # Convert headers to a string for logging
+        headers_str = str(dict(request.headers))
+        
+        # Log headers and body separately
+        log_entry = Log(
+            method="POST", 
+            time=datetime.now(), 
+            headers=headers_str, 
+            body=str(parsed_data)
+        )
         db.add(log_entry)
         db.commit()
         log_id = log_entry.id
@@ -233,21 +245,21 @@ def get_logs():
     db = SessionLocal()
     logs = db.query(Log).order_by(Log.time.desc()).all()
     db.close()
-    return [{"method": log.method, "time": log.time, "body": log.body} for log in logs]
+    return [{"method": log.method, "time": log.time, "headers": log.headers, "body": log.body} for log in logs]
 
 @app.get("/testcallback2/logs/recent")
 def get_recent_logs():
     db = SessionLocal()
     logs = db.query(Log).order_by(Log.time.desc()).limit(10).all()
     db.close()
-    return [{"method": log.method, "time": log.time, "body": log.body} for log in logs]
+    return [{"method": log.method, "time": log.time, "headers": log.headers, "body": log.body} for log in logs]
 
 @app.get("/testcallback2/logs/full")
 def get_full_logs():
     db = SessionLocal()
     logs = db.query(Log).order_by(Log.time.desc()).all()
     db.close()
-    return [{"method": log.method, "time": log.time, "body": log.body} for log in logs]
+    return [{"method": log.method, "time": log.time, "headers": log.headers, "body": log.body} for log in logs]
 
 @app.get("/testcallback2/page", response_class=HTMLResponse)
 def get_page():
